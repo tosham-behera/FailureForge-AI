@@ -1,5 +1,6 @@
 """Exercise the real SDK parser against in-memory HTTP responses only."""
 import json
+from types import SimpleNamespace
 
 import httpx
 import openai
@@ -7,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.meta_model import _DiagnosisRejected, _validated_diagnosis
 
 LOGS = 'worker: OSError: [Errno 28] No space left on device'
 FAKE_KEY = 'test-only-private-value'
@@ -70,6 +72,85 @@ def test_unfamiliar_failure_uses_structured_meta(provider, monkeypatch):
     assert request['response_format']['json_schema']['strict'] is True
     assert request['max_tokens'] == 4000
     assert 'tools' not in request
+
+
+def test_valid_json_content_is_still_strictly_validated_when_sdk_parse_is_empty():
+    message = SimpleNamespace(
+        refusal=None,
+        parsed=None,
+        content=json.dumps(DIAGNOSIS),
+    )
+    choice = SimpleNamespace(message=message, finish_reason='stop')
+    completion_response = SimpleNamespace(choices=[choice])
+
+    diagnosis = _validated_diagnosis(completion_response, LOGS)
+
+    assert diagnosis.model_dump() == DIAGNOSIS
+
+
+def test_hypothesis_references_accept_explicit_identifiers_and_canonicalize():
+    payload = {
+        **DIAGNOSIS,
+        'hypothesis_support': [
+            {'hypothesis': 'probable_root_cause', 'evidence': [DIAGNOSIS['evidence'][0]]},
+            {'hypothesis': 'possible_causes[0]', 'evidence': [DIAGNOSIS['evidence'][0]]},
+        ],
+    }
+    message = SimpleNamespace(refusal=None, parsed=payload, content=None)
+    completion_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason='stop')]
+    )
+
+    diagnosis = _validated_diagnosis(completion_response, LOGS)
+
+    assert [item.hypothesis for item in diagnosis.hypothesis_support] == [
+        DIAGNOSIS['probable_root_cause'], DIAGNOSIS['possible_causes'][0]
+    ]
+
+
+def test_unknown_or_missing_hypothesis_reference_is_rejected():
+    for reference in ('filesystem exhaustion', 'possible_causes[9]'):
+        payload = {
+            **DIAGNOSIS,
+            'hypothesis_support': [
+                {'hypothesis': reference, 'evidence': [DIAGNOSIS['evidence'][0]]}
+            ],
+        }
+        message = SimpleNamespace(refusal=None, parsed=payload, content=None)
+        completion_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason='stop')]
+        )
+
+        with pytest.raises(_DiagnosisRejected, match='unknown_hypothesis_reference'):
+            _validated_diagnosis(completion_response, LOGS)
+
+
+def test_prior_round_hypothesis_reference_is_validated_and_canonicalized():
+    prior = 'The filesystem may have exhausted available space.'
+    payload = {
+        **DIAGNOSIS,
+        'probable_root_cause': 'A worker cannot write to storage.',
+        'hypothesis_support': [
+            {'hypothesis': prior, 'evidence': [DIAGNOSIS['evidence'][0]]}
+        ],
+    }
+    message = SimpleNamespace(refusal=None, parsed=payload, content=None)
+    completion_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason='stop')]
+    )
+
+    diagnosis = _validated_diagnosis(completion_response, LOGS, [prior])
+
+    assert diagnosis.hypothesis_support[0].hypothesis == prior
+
+
+def test_rejected_output_is_classified_without_logging_response_content(provider, caplog):
+    provider['body'] = completion('{}')
+    response = analyze()
+
+    assert response.status_code == 502
+    assert 'category=schema_validation' in caplog.text
+    assert '{}' not in caplog.text
 
 
 @pytest.mark.parametrize('status,expected', [(429, 429), (401, 503), (403, 503), (500, 502), (400, 502)])
