@@ -17,6 +17,9 @@ DIAGNOSIS = {
     'possible_causes': ['An inode limit or per-user quota may have been reached.'],
     'evidence': ['OSError: [Errno 28] No space left on device'],
     'recommended_checks': ['Check free space, inode availability and quota on the affected filesystem.'],
+    'questions': ['How much disk space is available?', 'Are inodes or quotas exhausted?'],
+    'what_changed': 'Initial diagnosis; no previous investigation round.',
+    'hypothesis_support': [],
 }
 
 

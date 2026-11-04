@@ -18,3 +18,13 @@ def redact_secrets(text: str) -> str:
     for pattern, replacement in PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def redact_tree(value):
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, list):
+        return [redact_tree(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_tree(item) for key, item in value.items()}
+    return value

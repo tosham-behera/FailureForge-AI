@@ -1,160 +1,87 @@
-# FailureForge AI — Hackathon MVP (v0.1)
+﻿# FailureForge AI
 
-> AI-assisted incident diagnosis. **No changes to your applications. Optional fixed Docker sample verification.**
+An interactive failure investigation and safe verification prototype for the Meta Global AI Developer Hackathon 2026.
 
-Built for the Meta Global AI Developer Hackathon 2026. Frontend: React/Vite. Backend: FastAPI. AI: Meta Muse Spark 1.3 via Meta Model API (OpenAI-compatible SDK, schema-validated responses).
+**Workflow:** upload multiple logs → inspect hypotheses → answer targeted questions → revise the investigation → run an approved Docker experiment → download an evidence-backed Markdown report.
 
-## First run on Windows 11 (PowerShell)
+## Architecture
 
-### 1) Download/extract the ZIP and open the folder in VS Code
+React + Vite provides manual logs, three sample incidents, multiple file inputs, chronological investigation rounds, timelines, sample verification, and report download. FastAPI validates bounded requests, redacts obvious credentials, processes evidence and calls Meta Muse Spark 1.3 through the existing backend-only Meta Model API configuration. Demo mode uses deterministic offline rules with zero model calls. History lives in browser memory; no database is required.
 
-### 2) Backend terminal
+Routes: GET /api/health and POST /api/analyze, /api/investigate, /api/verify-fix, /api/report. Vite forwards /api to **127.0.0.1:8001**.
 
-```powershell
+Two fixed Docker fixtures reproduce port conflicts and a missing simulated TCP database dependency. Neither executes AI-generated commands or repairs the user's application.
+
+## Setup — Windows Git Bash
+
+Prerequisites: Python 3.12, Node.js/npm, Docker Desktop with Linux containers for optional verification. Demo mode needs **no API key or environment file**. Do not overwrite existing private configuration. From the repository root:
+
+```bash
 cd backend
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-$env:DEMO_MODE = 'true'
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+py -3.12 -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+DEMO_MODE=true ./.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-If `py` is not installed, use `python` in the first command. If PowerShell blocks activation, run `.venv\Scripts\python.exe -m pip install -r requirements.txt` and `.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000` instead.
+In another Git Bash terminal:
 
-Go to http://127.0.0.1:8000/docs for FastAPI's interactive API docs. The backend starts in **DEMO_MODE=true** without an API key.
-
-### 3) Frontend terminal (second terminal, with Node.js 18+)
-
-```powershell
+```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:5173 and click **Analyze incident**.
+Open http://127.0.0.1:5173 and confirm DEMO MODE. For an existing installation skip environment creation and dependency installation. On Linux/macOS use python3 and .venv/bin/python. PowerShell commands and detailed limits: [INVESTIGATION.md](INVESTIGATION.md).
 
-For an existing installation, do not recreate the environment or overwrite `.env`.
-From `backend`, run `$env:DEMO_MODE = 'true'` and
-`.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
-From a second terminal in `frontend`, run `npm run dev`.
-Confirm `/api/health` on both ports 8000 and 5173 returns `"mode":"demo"`.
-Try Database down, Port conflict, and Service timeout, clicking Analyze after each.
-For Port conflict, click Verify Fix and check PASSED, Docker ran: Yes,
-Cleanup: Succeeded, EADDRINUSE on port 4000, and HTTP 200 on port 4001.
+Build the fixtures from the repository root:
 
-If Vite returns an empty HTTP 500, the backend may not be accepting connections.
-Check the backend terminal for startup errors. A stale Uvicorn reload process can
-hold port 8000 without serving requests: stop the old backend with Ctrl+C and
-restart it using the command above. Wait for `Application startup complete`.
-Reload the browser to refresh the mode badge. Use one backend process for the demo.
-
-Frontend response handling tests: `node --test src/api.test.js` from `frontend`.
-
-### 4) Switch on real Meta AI
-
-Edit `backend/.env`:
-
-```env
-DEMO_MODE=false
-MODEL_API_KEY=YOUR_OWN_PRIVATE_KEY
-META_MODEL=muse-spark-1.3
-META_BASE_URL=https://api.meta.ai/v1
+```bash
+docker build --pull=false -t failureforge-port-conflict:1 backend/docker/port-conflict
+docker build --pull=false -t failureforge-database-connectivity:1 backend/docker/database-connectivity
 ```
 
-Restart FastAPI. Refresh the frontend. The badge should say **META LIVE**. Never paste your actual API key into a chat, browser console or public repository. `.env` is gitignored. Read [SECURITY.md](SECURITY.md) before pushing to GitHub. Calls in live mode may consume credits or incur charges.
+Building may download a missing base image; verification never pulls images.
 
-## Test backend (from backend directory)
+## Demonstration
 
-```powershell
-python -m pytest -q
+1. Try Database down, Port conflict and Service timeout; all produce offline diagnoses.
+2. Clear manual input. Upload application.log with `10:01:05 ERROR ECONNREFUSED 127.0.0.1:3306` and a repeated error at 10:01:06. Upload database.txt with `10:01:02 Database stopped unexpectedly`.
+3. Click Analyze and expand the timeline. Inspect source lines, repeated counts and timestamp caveats.
+4. Enter `MySQL runs in Docker and Node runs in another container.` and click Continue Investigation. Earlier diagnoses remain visible. Offline rules add a networking hypothesis; live mode uses Meta to reconsider the evidence.
+5. Select an approved scenario and click Verify Fix. Inspect before/after evidence, Docker execution and cleanup status.
+6. Download Incident Report before reloading. It includes history, evidence, hypotheses, recommendations, mode/model, recorded sample runs and limitations.
+
+Actual browser capture with synthetic logs, offline diagnosis and real Docker:
+
+![Investigation, timeline and Docker sample evidence](docs/images/investigation-demo.png)
+
+## Technical differentiation
+
+FailureForge retains an evolving evidence trail rather than replacing each answer. Targeted questions guide evidence collection, validated quotations connect hypotheses to source lines, timestamp groups avoid inventing global order, and a separate allowlisted Docker layer tests predefined recoveries. Reports distinguish suggestions from experimentally observed sample outcomes.
+
+## Tests and verified status
+
+```bash
+cd backend
+DEMO_MODE=true RUN_DOCKER_TESTS=1 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-## API
+```bash
+cd frontend
+node --test src/api.test.js src/uploads.test.js
+npm run build
+```
 
-- `GET /api/health` — status and active mode.
-- `POST /api/analyze` — input: `{"app_name":"My API","logs":"Error: connect ECONNREFUSED 127.0.0.1:3306"}`
+Latest regression: **62 backend tests passed**, including both real Docker tests; **11 frontend tests passed**; production build passed. Browser checks covered all three samples, multiple uploads, two investigation rounds, both Docker scenarios and downloaded report. See [verification record](VERIFICATION.md), including the initial transient Docker timeout.
 
-## What works
+Provider tests use mocked HTTP responses with the real SDK parser. No live Meta calls were made. Earlier live single-request results were owner-reported; multi-turn live quality remains unverified. Fresh dependency installation on an independent machine was not performed; the installed environment builds and runs.
 
-- Three synthetic incident examples (DB connection refused, port already used, timeout).
-- Backend validation: input 8–12,000 characters, bounded app name.
-- Offline, deterministic **demo mode**, with clearly labeled results and no API calls.
-- Live Meta Muse Spark diagnosis via structured output parsed as a Pydantic model.
-- Basic secret redaction before sending logs to Meta; **not a complete privacy filter**.
-- React diagnosis interface with evidence and safe next checks.
+## Limits and security
 
-## What is NOT implemented yet
+Four UTF-8 text files, 16 KiB each; combined evidence 20,000 characters / 32 KiB / 600 lines. Five rounds; follow-up evidence up to 6,000 characters. Plain filenames only; uploaded content is never executed. Redaction is best-effort: review logs and reports before sharing.
 
-- Production application fixes, multi-agent orchestration, observability metrics, file upload, persistent incident history, authentication, deployments.
-- Live Meta API integration was **not tested with a real key** in this starter.
-- Do not paste private production logs unless you are authorized and have checked for secrets/PII.
+Missing dates, timezones and clock skew can prevent ordering. Correlation is not causation. Offline rules do not provide general AI reasoning or guaranteed line attribution. Reports are client-supplied snapshots, not signed audit records. Docker success applies only to a disposable fixture; the database fixture is **not MySQL**. Cold/busy Docker can time out; ensure it is ready and explicitly retry. History is lost on reload. No production authentication or persistent case storage is included; keep the service local.
 
-## Recommended next milestones
+Only after explicit owner authorization for spending: restart the backend with process DEMO_MODE=false using existing backend-only credentials, Analyze synthetic logs once, then optionally Continue once (up to two paid calls). Restore DEMO_MODE=true and restart afterward. Never place keys in frontend or VITE variables.
 
-1. Test live Meta inference using your own API key.
-2. Add one **predefined, harmless Docker lab** with a known-good fixture: simulate a connection-refused issue, verify service status and run a prewritten test; never execute LLM-generated shell commands.
-3. Run 10–15 synthetic failures and track the fraction identified correctly with supporting evidence.
-4. Record a short demo showing the difference between a human searching logs and the tool's evidence-backed analysis.
-
-Meta documentation: https://dev.meta.ai/docs/cookbook/quickstart-chat-completions and https://dev.meta.ai/docs/cookbook/structured-output
-
-## Safe Fix Verification
-
-Port-conflict Docker verification is implemented. See [setup, safety limits, tests and file inventory](SAFE_FIX_VERIFICATION.md). A real Docker pass requires Docker Desktop and the locally built fixture image; unit tests alone do not verify the fix.
-
-## Unfamiliar failures and one controlled Meta test
-
-The same log input accepts arbitrary application errors (8–12,000 characters).
-Offline mode only recognizes the three demo patterns; unfamiliar failures remain
-Unknown with low confidence. Meta mode uses the configured `META_BASE_URL`,
-`META_MODEL` (default `muse-spark-1.3`), and backend-only `MODEL_API_KEY`.
-The Pydantic result includes an explanation, leading hypothesis, alternative
-possible causes, exact log excerpts, confidence, severity, and diagnostic checks.
-Evidence confirms only what the supplied logs say, not the true state of a system.
-Causes and repairs remain unverified. Docker verification still tests only its
-fixed, allowlisted port-conflict sample and cannot execute model-generated commands.
-
-Each Meta analysis makes one request, with a 35-second SDK timeout, a 4,000-token
-output budget (including reasoning), and no automatic retries. The SDK timeout
-applies to network operations, not a guaranteed total wall-clock deadline.
-Rate limits/quota return HTTP 429, timeouts 504, configuration/access errors 503,
-and connection, provider, malformed, refused, or ungrounded results 502. Errors
-never silently fall back to offline rules. The result badge identifies its source.
-
-Automated tests use in-memory HTTP responses with the real SDK parser and block
-real HTTP transports. No live Meta inference was performed during implementation.
-The live credentials, account access, latency, cost and model quality remain unverified.
-
-Only when you choose to authorize a paid live test:
-
-1. Stop the existing backend with Ctrl+C. Keep the saved `.env` in demo mode and
-   keep your existing key private; do not paste it into the terminal or frontend.
-2. In a terminal in `backend`, temporarily enable live mode for that process:
-
-   ```powershell
-   $env:DEMO_MODE = 'false'
-   .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-   ```
-
-3. With Vite running, refresh the browser. Check META LIVE, then paste this
-   synthetic unfamiliar error and click Analyze incident **once**:
-
-   ```text
-   worker: OSError: [Errno 28] No space left on device
-   Failed while writing report to /tmp/output.csv
-   ```
-
-4. Expect a META MODEL result explaining storage exhaustion, quoted log evidence,
-   unconfirmed causes, confidence, and checks. A safe API error means the test did
-   not succeed; do not repeatedly retry. Health checks do not call Meta.
-5. Stop the backend and restore demo mode in that same terminal:
-
-   ```powershell
-   $env:DEMO_MODE = 'true'
-   .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-   ```
-
-   Refresh and confirm DEMO MODE. Do not overwrite `.env` or commit credentials.
-
-Protocol reference: [Meta structured output documentation](https://dev.meta.ai/docs/cookbook/structured-output).
+See [security](SECURITY.md), [verification isolation](SAFE_FIX_VERIFICATION.md), and [submission summary](SUBMISSION.md).

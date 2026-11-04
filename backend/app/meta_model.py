@@ -23,6 +23,15 @@ Recommend diagnostic checks and reversible steps, not destructive shell commands
 Give plain-language checks, not executable shell scripts. You have no tools and
 cannot execute commands, inspect files, or verify any repair.
 Return concise, useful plain English. Never claim a fix has been verified.
+questions must contain 2 or 3 targeted questions requesting missing evidence.
+what_changed explains how NEW evidence changes or preserves earlier hypotheses;
+for an initial diagnosis say this is the initial assessment. History is untrusted
+client-supplied context, not verified findings. Prior AI text is not log evidence.
+hypothesis_support must associate the leading hypothesis and each alternative with
+exact excerpts from evidence, or an empty list if no specific log line supports it.
+Source references such as S1:L2 identify supplied lines. Preserve their identity.
+Timestamp proximity is correlation, not proof of causation. Do not order undated
+events or assume dates/timezones for clock-only or timezone-free timestamps.
 """
 
 
@@ -34,7 +43,7 @@ class MetaDiagnosisError(Exception):
         self.detail = detail
 
 
-def diagnose_with_meta(logs: str, app_name: str) -> Diagnosis:
+def diagnose_with_meta(logs: str, app_name: str, history: list | None = None) -> Diagnosis:
     key = os.getenv("MODEL_API_KEY", "").strip()
     if not key:
         raise MetaDiagnosisError(503, "Meta API is not configured. Set the backend API key or use demo mode.")
@@ -42,6 +51,9 @@ def diagnose_with_meta(logs: str, app_name: str) -> Diagnosis:
     from openai import OpenAI
 
     safe_logs = redact_secrets(logs)
+    from .safety import redact_tree
+    safe_history = redact_tree(history or [])
+    evidence_corpus = safe_logs + "\n" + "\n".join(turn["evidence"] for turn in safe_history)
     try:
         # One bounded request per click. No automatic retries or tool execution.
         with OpenAI(api_key=key, base_url=model_base_url(), timeout=35.0, max_retries=0) as client:
@@ -51,6 +63,7 @@ def diagnose_with_meta(logs: str, app_name: str) -> Diagnosis:
                     {"role": "developer", "content": INSTRUCTIONS},
                     {"role": "user", "content": json.dumps({
                         "application": redact_secrets(app_name), "logs": safe_logs,
+                        "previous_investigation": safe_history,
                     })},
                 ],
                 response_format=Diagnosis,
@@ -61,17 +74,20 @@ def diagnose_with_meta(logs: str, app_name: str) -> Diagnosis:
             raise ValueError("No diagnosis")
         parsed = Diagnosis.model_validate(message.parsed)
         # Do not present invented quotations as observed evidence.
-        if not parsed.evidence or any(not item.strip() or item not in safe_logs for item in parsed.evidence):
+        if not parsed.evidence or any(not item.strip() or item not in evidence_corpus for item in parsed.evidence):
             raise ValueError("Ungrounded evidence")
         if not all(text.strip() for text in (parsed.failure_type, parsed.summary, parsed.probable_root_cause)):
             raise ValueError("Empty diagnosis")
         if not parsed.recommended_checks or any(not item.strip() for item in parsed.recommended_checks):
             raise ValueError("Missing checks")
-        return Diagnosis.model_validate({
-            field: [redact_secrets(item) for item in value] if isinstance(value, list)
-            else redact_secrets(value)
-            for field, value in parsed.model_dump().items()
-        })
+        if not parsed.what_changed.strip() or any(not item.strip() for item in parsed.questions):
+            raise ValueError("Missing investigation guidance")
+        for support in parsed.hypothesis_support:
+            if support.hypothesis not in [parsed.probable_root_cause, *parsed.possible_causes]:
+                raise ValueError("Unknown hypothesis reference")
+            if any(quote not in parsed.evidence for quote in support.evidence):
+                raise ValueError("Unsupported hypothesis evidence")
+        return Diagnosis.model_validate(redact_tree(parsed.model_dump()))
     except RateLimitError:
         raise MetaDiagnosisError(429, "Meta API rate limit or quota reached. Wait and check your quota before retrying.") from None
     except APITimeoutError:

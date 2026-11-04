@@ -1,38 +1,21 @@
-# Keep your Meta API key safe
+﻿# Security and credit protection
 
-## Before you run the app
+Demo development needs no key. Process DEMO_MODE=true overrides private dotenv settings without changing the file. Never overwrite existing environment files. Keep credentials backend-only, never in React, VITE variables, screenshots, logs or repository content.
 
-1. Copy `backend/.env.example` to `backend/.env`.
-2. Leave `DEMO_MODE=true` while building the UI and debugging locally. Demo mode makes no Meta API calls.
-3. When you are ready for real testing, set `DEMO_MODE=false` and put the secret in `backend/.env` as `MODEL_API_KEY=...`.
-4. **Never paste your key into frontend files, a React `VITE_` variable, a screenshot, an AI coding-agent prompt, or a public GitHub issue.** Only the local FastAPI backend should read it.
-5. Keep `.env.example` as a placeholder-only template, with no real keys.
+Live calls require explicit Analyze or Continue actions; there are no automatic provider retries. Use synthetic logs for owner-authorized live tests. Do not expose this prototype publicly without authentication, rate limits and spend controls.
 
-## Before your first GitHub push
+Uploads are bounded UTF-8 text with plain filenames, never saved to the server or executed. Logs and prior model output are untrusted prompt data. Redaction is best-effort: review evidence and reports before sharing. Docker accepts only two fixed fixtures; see [isolation](SAFE_FIX_VERIFICATION.md).
 
-From the project root, run:
+## Before publishing
 
-```powershell
+Inspect paths without displaying secret contents:
+
+```bash
 git status --short
-git check-ignore -v backend/.env
+git check-ignore backend/.env frontend/.env.local
+git ls-files '*.env' '*.pem' '*.key'
 ```
 
-`git check-ignore` should print a rule from `.gitignore`, showing that `backend/.env` is excluded. If it doesn't, stop and check where your repo root and `.gitignore` are located. If you have not created `backend/.env` yet, create it from the example first.
+Environment paths should be ignored and tracked secret paths absent. Stage explicitly reviewed source/documentation paths, then inspect git diff --cached --name-only and staged source changes. Do not blindly stage everything. This regression session did not read or stage the existing untracked backend/.env.example; privately review it before publishing.
 
-Then stage and inspect exactly what will be uploaded:
-
-```powershell
-git add .
-git diff --cached --name-only
-```
-
-Confirm that `backend/.env`, `.env.local`, private keys, and any sensitive local files are **not** listed. Use `git diff --cached` to inspect content before you commit.
-
-**Important:** `.gitignore` prevents Git from adding matching *untracked* files. It does **not** untrack secrets already committed or staged. If an `.env` is already tracked, run `git rm --cached backend/.env` (preserves the local file) and commit its removal. If a real key was ever pushed to GitHub, **revoke/rotate it immediately**: deleting it from the latest commit does not make that key safe again.
-
-## Protect API credits
-
-- Start with `DEMO_MODE=true`.
-- Use real Meta API calls only for a few planned integration tests.
-- Don't expose a live API-powered backend publicly without authentication, rate limits, and spend controls.
-- The current backend only performs **basic redaction** of known secret patterns in logs. Do not send confidential production logs, access tokens, or personal data to it.
+Ignore rules do not protect already committed secrets. If a credential was published, revoke it and review history. Reports are client-supplied snapshots, not authenticated audit records. No API keys were read or modified during this resumed session.

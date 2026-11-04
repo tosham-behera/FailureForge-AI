@@ -4,12 +4,12 @@ export async function requestJson(url, options) {
   try {
     response = await fetch(url, options)
   } catch {
-    throw new Error('Cannot reach the API. Check that FastAPI is running on port 8000 and Vite on port 5173.')
+    throw new Error('Cannot reach the API. Check that FastAPI is running on the port configured in the Vite proxy and Vite on port 5173.')
   }
   const text = await response.text()
   const context = `API request failed (HTTP ${response.status}).`
   if (!text.trim()) {
-    throw new Error(`${context} Empty response. Check that FastAPI is running on port 8000.`)
+    throw new Error(`${context} Empty response. Check that FastAPI is running on the port configured in the Vite proxy.`)
   }
   let data
   try {
